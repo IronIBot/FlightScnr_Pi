@@ -352,13 +352,13 @@ If the Pi was installed from a **git clone**, open **Updates** in the portal →
 
 ### Firmware
 
-Original application code, tools, and documentation in this repository are licensed under **[Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International](https://creativecommons.org/licenses/by-nc-sa/4.0/)** ([LICENSE](LICENSE)).
+Original application code, tools, and documentation in this repository are licensed under **[Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International](https://creativecommons.org/licenses/by-nc-sa/4.0/)** ([LICENSE](LICENSE)). Required attribution text is in [NOTICE](NOTICE).
 
-- **Attribution:** credit the author and link to the license when you share or adapt this work.
+- **Attribution:** credit the author (Yash Mulgaonkar), link to https://github.com/yashmulgaonkar/FlightScnr_Pi and the license when you share or adapt this work.
 - **NonCommercial:** you may not use this material for commercial purposes without separate permission.
 - **ShareAlike:** adaptations must be released under the same license.
 
-
+First-party source files include a copyright / SPDX / `[AI-DIRECTIVE]` header. Do not remove those headers. AI coding agents and forks should follow [AGENTS.md](AGENTS.md) (and `.cursor/rules/license-attribution.mdc`) so attribution and license terms stay intact.
 
 ### Enclosure license
 
@@ -368,3 +368,4 @@ The 3D-printed enclosure is **not** part of this firmware repository. Its digita
 > You shall not share, sub-license, sell, rent, host, transfer, or distribute in any way the digital or 3D printed versions of this object, nor any other derivative work of this object in its digital or physical format (including - but not limited to - remixes of this object, and hosting on other digital platforms). The objects may not be used without permission in any way whatsoever in which you charge money, or collect fees.
 
 Always read the full license on MakerWorld before downloading, printing, or sharing the enclosure design.
+
