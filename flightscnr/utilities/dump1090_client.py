@@ -102,6 +102,7 @@ def _to_entry(
     home_lon: float,
     radius_nm: float,
     min_altitude: int,
+    max_seen_pos_s: float = _MAX_SEEN_POS_S,
 ) -> dict | None:
     lat = plane.get("lat")
     lon = plane.get("lon")
@@ -112,7 +113,7 @@ def _to_entry(
         seen = float(plane.get("seen_pos", plane.get("seen", 0)) or 0)
     except (TypeError, ValueError):
         seen = 0.0
-    if seen > _MAX_SEEN_POS_S:
+    if seen > max_seen_pos_s:
         return None
 
     lat_f = float(lat)
@@ -181,6 +182,7 @@ def fetch_aircraft_entries(
     min_altitude: int = 0,
     *,
     url: str | None = None,
+    max_seen_pos_s: float = _MAX_SEEN_POS_S,
 ) -> list[dict]:
     """Return flight dicts from a local dump1090/readsb/tar1090 JSON feed."""
     global _CACHE
@@ -233,6 +235,7 @@ def fetch_aircraft_entries(
             home_lon=lon,
             radius_nm=radius_nm,
             min_altitude=min_altitude,
+            max_seen_pos_s=max_seen_pos_s,
         )
         if entry:
             entries.append(entry)

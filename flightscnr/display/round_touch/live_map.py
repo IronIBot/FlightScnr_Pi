@@ -46,7 +46,7 @@ import threading
 
 import pygame
 
-from display.round_touch import aircraft, draw, map_bg, theme
+from display.round_touch import aircraft, airport_overlay, draw, map_bg, theme
 from display.round_touch import route_map as _rm
 
 logger = logging.getLogger("flightscnr.display")
@@ -76,6 +76,23 @@ _STICKY_MARGIN = 0.55
 _ZOOM_MIN, _ZOOM_MAX = 3, 18
 _MAX_LIVE_TILES = 81  # 9x9 tiles - generous for an 8-48km box, still Pi-friendly
 
+# Discrete display-radius steps for the live map.
+# The tracking/search radius remains continuous; only the visible map scale
+# is snapped to these values.
+_LIVE_MAP_RADIUS_STEPS_KM = (
+    3.2,
+    4.8,
+    8.0,
+    13.0,
+    16.0,
+    24.0,
+    32.0,
+    48.0,
+    64.0,
+    96.0,
+    120.0,
+)
+
 # Cached viewport state: bounds actually fetched, the raster surface, and
 # its pixel size. Keyed by (panel_width, panel_height, style) so switching
 # map style / panel size starts a fresh viewport instead of reusing a
@@ -84,6 +101,52 @@ _viewport: dict[tuple, dict] = {}
 _inflight: set[tuple] = set()
 _lock = threading.Lock()
 
+def _display_radius_km(
+    radius_km: float,
+    current_radius_km: float | None,
+) -> float:
+    """Choose a discrete live-map scale with asymmetric hysteresis."""
+
+    raw = max(0.0, float(radius_km))
+    steps = _LIVE_MAP_RADIUS_STEPS_KM
+
+    if current_radius_km is None:
+        for step in steps:
+            if raw <= step:
+                return step
+        return steps[-1]
+
+    try:
+        idx = steps.index(current_radius_km)
+    except ValueError:
+        for step in steps:
+            if raw <= step:
+                return step
+        return steps[-1]
+
+    # Zoom in early while slowing down.
+    if idx > 0:
+        lower = steps[idx - 1]
+        current = steps[idx]
+
+        down_threshold = current - (current - lower) * 0.25
+
+        if raw <= down_threshold:
+            return lower
+
+    # Zoom out conservatively while speeding up.
+    if idx < len(steps) - 1:
+        higher = steps[idx + 1]
+
+        # Do not zoom out until we are close to the next scale.
+        up_threshold = current_radius_km + (
+            higher - current_radius_km
+        ) * 0.90
+
+        if raw >= up_threshold:
+            return higher
+
+    return current_radius_km
 
 def _bounds_for_center(lat: float, lon: float, radius_km: float) -> tuple[float, float, float, float]:
     """Square-ish bounding box around (lat, lon) at radius_km — same
@@ -101,20 +164,38 @@ def _viewport_key(width: int, height: int, style: str) -> tuple:
     return (int(width), int(height), style)
 
 
-def _needs_new_viewport(vp: dict | None, lat: float, lon: float) -> bool:
+def _needs_new_viewport(
+    vp: dict | None,
+    lat: float,
+    lon: float,
+    radius_km: float,
+) -> bool:
     if vp is None:
         return True
+
+    old_radius_km = vp.get("radius_km")
+
+    if old_radius_km is None:
+        return True
+
+    # Refresh when the requested scale changes materially.
+    # 10% avoids refetching tiles for tiny speed fluctuations.
+    if abs(radius_km - old_radius_km) / max(old_radius_km, 0.1) >= 0.10:
+        return True
+
     min_lat, max_lat, min_lon, max_lon = vp["bounds"]
     lat_half = (max_lat - min_lat) / 2.0
     lon_half = (max_lon - min_lon) / 2.0
     center_lat = (max_lat + min_lat) / 2.0
     center_lon = (max_lon + min_lon) / 2.0
+
     if lat_half <= 0 or lon_half <= 0:
         return True
+
     d_lat = abs(lat - center_lat) / lat_half
     d_lon = abs(lon - center_lon) / lon_half
-    return max(d_lat, d_lon) > _STICKY_MARGIN
 
+    return max(d_lat, d_lon) > _STICKY_MARGIN
 
 def invalidate() -> None:
     """Call when the tracked aircraft changes (new callsign) so the old
@@ -231,7 +312,7 @@ def _request_live_viewport(
     key = _viewport_key(width, height, style)
     with _lock:
         vp = _viewport.get(key)
-        stale = _needs_new_viewport(vp, lat, lon)
+        stale = _needs_new_viewport(vp, lat, lon, radius_km)
         if not stale:
             return vp
         if key in _inflight:
@@ -252,8 +333,11 @@ def _request_live_viewport(
                     if len(_viewport) > 6:
                         _viewport.pop(next(iter(_viewport)), None)
                     _viewport[key] = {
-                        "bounds": bounds, "raster": raster,
-                        "raster_w": raster_w, "raster_h": raster_h,
+                        "bounds": bounds,
+                        "raster": raster,
+                        "raster_w": raster_w,
+                        "raster_h": raster_h,
+                        "radius_km": radius_km,
                     }
                 logger.info(
                     "[live_map] viewport ready %dx%d (raster %dx%d) radius=%.0fkm style=%s",
@@ -297,8 +381,41 @@ def render_live_tracking_map(
         return None
 
     style = _rm._route_map_style()
-    vp = _request_live_viewport(lat, lon, radius_km, width, height, style)
 
+    key = _viewport_key(width, height, style)
+    with _lock:
+        current_vp = _viewport.get(key)
+
+    current_radius_km = (
+        current_vp.get("radius_km")
+        if current_vp is not None
+        else None
+    )
+
+    display_radius_km = _display_radius_km(
+        radius_km,
+        current_radius_km,
+    )
+
+    logger.info(
+        "[live_map] raw_radius=%.1f km display_radius=%.1f km current_radius=%s",
+        radius_km,
+        display_radius_km,
+        (
+            f"{current_radius_km:.1f} km"
+            if current_radius_km is not None
+            else "none"
+        ),
+    )
+
+    vp = _request_live_viewport(
+        lat,
+        lon,
+        display_radius_km,
+        width,
+        height,
+        style,
+    )
     surf = pygame.Surface((width, height))
     surf.fill(_PANEL_BG)
 
@@ -306,6 +423,17 @@ def render_live_tracking_map(
         raster = vp["raster"]
         min_lat, max_lat, min_lon, max_lon = vp["bounds"]
         raster_w, raster_h = vp["raster_w"], vp["raster_h"]
+
+        raster_with_runways = raster.copy()
+
+        airport_overlay.draw_live_runways(
+            raster_with_runways,
+            bounds=vp["bounds"],
+            width=raster_w,
+            height=raster_h,
+        )
+
+        raster = raster_with_runways
 
         # Where does the aircraft's *current* position fall within the
         # cached raster? This is recomputed every frame regardless of

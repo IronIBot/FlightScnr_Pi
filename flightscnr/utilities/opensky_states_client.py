@@ -42,7 +42,7 @@ _API_BASE = "https://opensky-network.org/api"
 
 # States churn fast; a short cache still saves a repeat call within one
 # display refresh cycle without going stale for the live map.
-_CACHE_TTL_S = 8
+_CACHE_TTL_S = 1.0
 _cache: dict[str, tuple[dict | None, float]] = {}
 
 
@@ -72,6 +72,8 @@ def _state_to_entry(state: list) -> dict | None:
     try:
         icao24 = (state[0] or "").strip().upper()
         callsign = (state[1] or "").strip()
+        time_position = state[3]
+        last_contact = state[4]
         lon = state[5]
         lat = state[6]
         baro_alt_m = state[7]
@@ -83,6 +85,15 @@ def _state_to_entry(state: list) -> dict | None:
         squawk = state[14] if len(state) > 14 else None
     except (IndexError, TypeError):
         return None
+    try:
+        time_position = int(time_position) if time_position is not None else None
+    except (TypeError, ValueError):
+        time_position = None
+
+    try:
+        last_contact = int(last_contact) if last_contact is not None else None
+    except (TypeError, ValueError):
+        last_contact = None
 
     if lat is None or lon is None:
         return None
@@ -117,6 +128,8 @@ def _state_to_entry(state: list) -> dict | None:
         "db_flags": 0,
         "adsb_category": "",
         "data_source": "opensky",
+        "position_timestamp": time_position,
+        "last_contact_timestamp": last_contact,
     }
 
 

@@ -32,6 +32,7 @@ visible extent always matches what was actually queried.
 
 from __future__ import annotations
 
+import time
 import logging
 import math
 
@@ -66,6 +67,19 @@ def _settings():
 
     return order, preview_min, min_km, max_km
 
+def _low_speed_scale(speed_kt: float) -> float:
+    """Reduce live-tracking radius more aggressively at low speeds.
+
+    Keeps high-speed aircraft close to the original linear scaling while
+    making approach/landing speeds use a tighter map radius.
+    """
+    if speed_kt >= 300:
+        return 1.0
+
+    if speed_kt <= 100:
+        return 0.45
+
+    return 0.45 + (speed_kt - 100.0) / 200.0 * 0.55
 
 def compute_tracking_radius_km(speed_kt: float | None) -> float:
     """Radius = distance the aircraft covers in the preview window,
@@ -74,8 +88,13 @@ def compute_tracking_radius_km(speed_kt: float | None) -> float:
     _, preview_min, min_km, max_km = _settings()
     if not speed_kt or speed_kt <= 0:
         return min_km
-    speed_kph = float(speed_kt) * KM_PER_NM
+
+    speed_kt = float(speed_kt)
+    speed_kph = speed_kt * KM_PER_NM
     projected_km = speed_kph * (preview_min / 60.0)
+
+    projected_km *= _low_speed_scale(speed_kt)
+
     return max(min_km, min(max_km, projected_km))
 
 
@@ -103,7 +122,7 @@ def _try_dump1090(center_lat, center_lon, radius_km, callsign, icao24):
     if not settings.get("DUMP1090_ENABLED"):
         return None
     radius_nm = radius_km / KM_PER_NM
-    entries = fetch_aircraft_entries(center_lat, center_lon, radius_nm, url=settings.get("DUMP1090_URL"))
+    entries = fetch_aircraft_entries(center_lat, center_lon, radius_nm, url=settings.get("DUMP1090_URL"), max_seen_pos_s=2.5)
     return _match(entries, callsign, icao24)
 
 
@@ -215,6 +234,9 @@ _SOURCE_FUNCS = {
     "fr24": _try_fr24,
 }
 
+# Highest OpenSky position timestamp accepted for each tracked aircraft.
+# Prevents an older OpenSky state from moving the live-map aircraft backwards.
+_LAST_OPENSKY_POSITION_TS: dict[str, int] = {}
 
 def fetch_live_position(
     *,
@@ -243,10 +265,66 @@ def fetch_live_position(
         if fn is None:
             continue
         try:
-            entry = fn(last_known_lat, last_known_lon, radius_km, callsign, icao24)
+            started = time.monotonic()
+
+            entry = fn(
+                last_known_lat,
+                last_known_lon,
+                radius_km,
+                callsign,
+                icao24,
+            )
+
+            elapsed = time.monotonic() - started
+
+            logger.info(
+                "[live_map] lookup source=%s time=%.3fs hit=%s lat=%s lon=%s speed=%s",
+                source_name,
+                elapsed,
+                bool(entry),
+                entry.get("plane_latitude") if entry else None,
+                entry.get("plane_longitude") if entry else None,
+                entry.get("ground_speed") if entry else None,
+            )
+
         except Exception:
+
             logger.exception("position_source: %s lookup raised", source_name)
             entry = None
+
+        if entry and source_name == "opensky":
+            position_ts = entry.get("position_timestamp")
+
+            # Prefer ICAO24 as the stable aircraft identity; callsign is the
+            # fallback for the rare case where no transponder address is known.
+            aircraft_key = (icao24 or "").strip().upper()
+            if not aircraft_key:
+                aircraft_key = (callsign or "").strip().upper()
+
+            if position_ts is not None and aircraft_key:
+                try:
+                    position_ts = int(position_ts)
+                except (TypeError, ValueError):
+                    position_ts = None
+
+                if position_ts is not None:
+                    previous_ts = _LAST_OPENSKY_POSITION_TS.get(aircraft_key)
+
+                    if previous_ts is not None and position_ts < previous_ts:
+                        logger.warning(
+                            "[live_map] rejecting stale opensky position "
+                            "aircraft=%s timestamp=%s previous=%s "
+                            "lat=%s lon=%s",
+                            aircraft_key,
+                            position_ts,
+                            previous_ts,
+                            entry.get("plane_latitude"),
+                            entry.get("plane_longitude"),
+                        )
+                        entry = None
+                    else:
+                        _LAST_OPENSKY_POSITION_TS[aircraft_key] = position_ts
+
         if entry:
             try:
                 from utilities.position_source_stats import record_position_source_usage
@@ -255,5 +333,3 @@ def fetch_live_position(
             except Exception:
                 pass
             return entry, source_name, radius_km
-
-    return None, None, radius_km

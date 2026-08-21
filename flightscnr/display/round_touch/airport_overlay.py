@@ -55,6 +55,10 @@ _icon_warned = False
 _callout_airport: dict[str, Any] | None = None
 _callout_until = 0.0
 _callout_rect = pygame.Rect(0, 0, 0, 0)
+_live_runways: list[dict[str, Any]] = []
+_live_cache_key: tuple | None = None
+_live_load_key: tuple | None = None
+_live_loading = False
 
 
 def _icons_on() -> bool:
@@ -189,6 +193,102 @@ def _ensure_cached() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         ).start()
     return stale_a, stale_r
 
+def _live_query_key(
+    bounds: tuple[float, float, float, float],
+) -> tuple:
+    min_lat, max_lat, min_lon, max_lon = bounds
+    return (
+        round(min_lat, 3),
+        round(max_lat, 3),
+        round(min_lon, 3),
+        round(max_lon, 3),
+        bool(_centerlines_on()),
+        _map_style(),
+    )
+
+
+def _finish_live_load(key: tuple, segs: list) -> None:
+    global _live_runways, _live_cache_key, _live_loading
+
+    with _lock:
+        if _live_load_key != key:
+            return
+
+        _live_runways = segs
+        _live_cache_key = key
+        _live_loading = False
+
+
+def _load_live_worker(
+    key: tuple,
+    bounds: tuple[float, float, float, float],
+) -> None:
+    segs: list[dict[str, Any]] = []
+
+    try:
+        from utilities.airports import iter_airports_near
+        from utilities.runways import runways_for_idents
+
+        min_lat, max_lat, min_lon, max_lon = bounds
+
+        center_lat = (min_lat + max_lat) / 2.0
+        center_lon = (min_lon + max_lon) / 2.0
+
+        # Bounds are already the overscanned live-map viewport.
+        radius_km = max(
+            (max_lat - min_lat) * 111.0 / 2.0,
+            1.0,
+        )
+
+        airports = iter_airports_near(
+            center_lat,
+            center_lon,
+            radius_km,
+        )
+
+        if _runways_allowed():
+            segs = runways_for_idents(
+                ap.get("ident") for ap in airports
+            )
+
+    except Exception:
+        logger.exception("live-map airport overlay query failed")
+        segs = []
+
+    _finish_live_load(key, segs)
+
+
+def _ensure_live_cached(
+    bounds: tuple[float, float, float, float],
+) -> list[dict[str, Any]]:
+    global _live_load_key, _live_loading
+
+    if not _runways_allowed():
+        return []
+
+    key = _live_query_key(bounds)
+
+    with _lock:
+        if _live_cache_key == key:
+            return list(_live_runways)
+
+        already = _live_loading and _live_load_key == key
+
+        if not already:
+            _live_loading = True
+            _live_load_key = key
+
+        stale = list(_live_runways)
+
+    if not already:
+        threading.Thread(
+            target=_load_live_worker,
+            args=(key, bounds),
+            daemon=True,
+            name="live-airport-overlay",
+        ).start()
+
+    return stale
 
 def _screen_xy(lat: float, lon: float) -> tuple[int, int] | None:
     try:
@@ -314,6 +414,74 @@ def _draw_marker(
     else:
         _fallback_mark(surface, x, y)
 
+def draw_live_runways(
+    surface: pygame.Surface,
+    *,
+    bounds: tuple[float, float, float, float],
+    width: int,
+    height: int,
+) -> None:
+    """Draw runway centerlines onto an aircraft-centered live-map surface."""
+    if not _runways_allowed():
+        return
+
+    runways = _ensure_live_cached(bounds)
+    if not runways:
+        return
+
+    from display.round_touch import route_map as _rm
+
+    min_lat, max_lat, min_lon, max_lon = bounds
+
+    line_width = (
+        max(2, theme.s(3))
+        if _map_style() in ("light", "voyager")
+        else max(1, theme.s(2))
+    )
+
+    color = _runway_color()
+
+    for seg in runways:
+        try:
+            p0 = _rm._mercator_to_panel(
+                float(seg["le_lat"]),
+                float(seg["le_lon"]),
+                min_lat=min_lat,
+                max_lat=max_lat,
+                min_lon=min_lon,
+                max_lon=max_lon,
+                left=0,
+                top=0,
+                width=width,
+                height=height,
+            )
+
+            p1 = _rm._mercator_to_panel(
+                float(seg["he_lat"]),
+                float(seg["he_lon"]),
+                min_lat=min_lat,
+                max_lat=max_lat,
+                min_lon=min_lon,
+                max_lon=max_lon,
+                left=0,
+                top=0,
+                width=width,
+                height=height,
+            )
+
+        except (KeyError, TypeError, ValueError):
+            continue
+
+        if p0 is None or p1 is None:
+            continue
+
+        pygame.draw.line(
+            surface,
+            color,
+            (int(p0[0]), int(p0[1])),
+            (int(p1[0]), int(p1[1])),
+            line_width,
+        )
 
 def draw_airports(
     surface: pygame.Surface, pan_offset: tuple[int, int] | None = None
