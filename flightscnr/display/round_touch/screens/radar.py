@@ -1407,6 +1407,17 @@ def visible_in_range_count(flights) -> int:
     return count
 
 
+def visible_in_range_count_at_floor(flights, min_height_ft: int) -> int:
+    """Count normal in-range traffic at a hypothetical minimum-altitude floor.
+
+    Reuses the exact existing radar filter path while the settings module exposes
+    a synchronous, runtime-only probe floor. No persistent operator setting is
+    changed.
+    """
+    with settings.temporary_min_height_probe(int(min_height_ft)):
+        return visible_in_range_count(flights)
+
+
 def _draw_status(surface, flights):
     try:
         from config import location_configured, location_status

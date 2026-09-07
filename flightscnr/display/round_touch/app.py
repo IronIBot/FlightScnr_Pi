@@ -5069,6 +5069,40 @@ class RoundTouchDisplay:
         except Exception:
             logger.debug("Scheduled weather refresh tick failed", exc_info=True)
 
+    def _auto_floor_probe_flights(self) -> list:
+        """Unfiltered aircraft + active AIS snapshot for hypothetical floor tests.
+
+        ``self.flights`` comes from ``peek_data()`` and may already have lost
+        aircraft below the current config floor. F2 must be able to see them.
+        """
+        flights = list(self.overhead.peek_data_unfiltered() or [])
+        mode = settings.traffic_mode()
+        if mode == "marine":
+            flights = []
+        if mode in ("marine", "both") and self._ais_vessels:
+            flights.extend(self._ais_vessels)
+        return self._position_smoother.apply(flights)
+
+    def _auto_floor_standard_has_traffic(self, probe_flights: list) -> bool:
+        """F1: traffic visible at the persisted operator standard floor."""
+        return radar.visible_in_range_count_at_floor(
+            probe_flights, settings.configured_min_height_ft()
+        ) > 0
+
+    def _auto_floor_lower_probe(self, probe_flights: list) -> bool:
+        """F2 probe: continuously report traffic 500 ft below current floor."""
+        return radar.visible_in_range_count_at_floor(
+            probe_flights, settings.next_lower_min_height_ft()
+        ) > 0
+
+    def _auto_floor_higher_probe(self, probe_flights: list) -> bool:
+        """F3: report traffic 500 ft above current, capped at F1 standard."""
+        if settings.min_height_ft() >= settings.configured_min_height_ft():
+            return False
+        return radar.visible_in_range_count_at_floor(
+            probe_flights, settings.next_higher_min_height_ft()
+        ) > 0
+
     def _tick_auto_idle_clock(self):
         if self._radar_modal_active() or radial_menu.is_open():
             return
@@ -5078,23 +5112,98 @@ class RoundTouchDisplay:
             return
         if self.screen == SCREEN_DISCLAIMER:
             return
+
+        now = time.time()
+        auto_lower = settings.auto_lower_altitude_floor_on_empty_enabled()
+        probe_flights = self._auto_floor_probe_flights() if auto_lower else []
+        current_floor = settings.min_height_ft()
+        standard_floor = settings.configured_min_height_ft()
+
+        # F1 has absolute priority. Any standard-floor traffic immediately
+        # restores the persisted floor and stops adaptive lowering.
+        if auto_lower and self._auto_floor_standard_has_traffic(probe_flights):
+            changed = current_floor != standard_floor or settings.min_height_override_active()
+            if changed:
+                settings.clear_min_height_override()
+                radar.invalidate_frame_layer()
+            self._radar_visible_since = now
+            if (
+                self._auto_idle_clock
+                and self.screen in (
+                    SCREEN_CLOCK,
+                    SCREEN_ANALOG_CLOCK,
+                    SCREEN_ANALOG_NIGHT,
+                    SCREEN_FLIEGER_CLOCK,
+                    SCREEN_MOON,
+                    SCREEN_FORECAST,
+                )
+            ):
+                self._return_to_radar()
+                self._safe_draw()
+            elif changed and self.screen == SCREEN_RADAR:
+                self._safe_draw()
+            return
+
+        # F2 runs continuously whenever adaptive lowering is active. The result
+        # is available every tick; the actual -500 ft action still waits for the
+        # existing AUTO_IDLE_MIN_RADAR_S (=5 s) grace period.
+        lower_probe_has_traffic = (
+            self._auto_floor_lower_probe(probe_flights) if auto_lower else False
+        )
+
+        current_has_traffic = radar.visible_in_range_count(self._radar_flights()) > 0
+
         if self.screen == SCREEN_RADAR:
-            if radar.visible_in_range_count(self.flights) == 0:
-                if time.time() - self._radar_visible_since >= AUTO_IDLE_MIN_RADAR_S:
-                    self._auto_idle_clock = True
-                    self._open_preferred_clock()
-                    self._safe_draw()
-            else:
-                self._radar_visible_since = time.time()
-        elif (
+            if not current_has_traffic:
+                if now - self._radar_visible_since >= AUTO_IDLE_MIN_RADAR_S:
+                    if auto_lower and current_floor > 0:
+                        old_floor = current_floor
+                        new_floor = settings.step_down_min_height_ft()
+                        logger.debug(
+                            "Auto floor F2: %d -> %d ft (lower probe traffic=%s)",
+                            old_floor,
+                            new_floor,
+                            lower_probe_has_traffic,
+                        )
+                        radar.invalidate_frame_layer()
+                        self._radar_visible_since = now
+                        self._safe_draw()
+                    else:
+                        self._auto_idle_clock = True
+                        self._open_preferred_clock()
+                        self._safe_draw()
+                return
+
+            self._radar_visible_since = now
+
+            # F3 only runs below F1 standard and only while current floor already
+            # has traffic. It may raise one 500 ft step, never above standard.
+            if (
+                auto_lower
+                and current_floor < standard_floor
+                and self._auto_floor_higher_probe(probe_flights)
+            ):
+                old_floor = current_floor
+                new_floor = settings.step_up_min_height_ft()
+                logger.debug("Auto floor F3: %d -> %d ft", old_floor, new_floor)
+                radar.invalidate_frame_layer()
+                self._radar_visible_since = now
+                self._safe_draw()
+            return
+
+        if (
             self._auto_idle_clock
-            # The board is somewhere the user navigated to on purpose, not an
-            # idle screen to be reclaimed the moment an aircraft appears.
-            # Returning from it looked like the board going back to radar too
-            # quickly.
-            and self.screen in (SCREEN_CLOCK, SCREEN_ANALOG_CLOCK, SCREEN_ANALOG_NIGHT, SCREEN_FLIEGER_CLOCK, SCREEN_MOON, SCREEN_FORECAST)
-            and radar.visible_in_range_count(self.flights) > 0
+            and self.screen in (
+                SCREEN_CLOCK,
+                SCREEN_ANALOG_CLOCK,
+                SCREEN_ANALOG_NIGHT,
+                SCREEN_FLIEGER_CLOCK,
+                SCREEN_MOON,
+                SCREEN_FORECAST,
+            )
+            and current_has_traffic
         ):
+            self._radar_visible_since = now
             self._return_to_radar()
             self._safe_draw()
 
