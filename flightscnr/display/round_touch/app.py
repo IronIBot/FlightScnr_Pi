@@ -1908,6 +1908,9 @@ class RoundTouchDisplay:
             return
         elif action == "idle_clock":
             settings.toggle_auto_idle_clock()
+        elif action == "auto_floor":
+            settings.toggle_auto_lower_altitude_floor_on_empty()
+            radar.invalidate_frame_layer()
         elif action == "default_clock":
             self._open_atc_picker("default_clock")
         elif action == "default_clock_off_hours":
@@ -5124,8 +5127,14 @@ class RoundTouchDisplay:
         if auto_lower and self._auto_floor_standard_has_traffic(probe_flights):
             changed = current_floor != standard_floor or settings.min_height_override_active()
             if changed:
+                old_floor = current_floor
                 settings.clear_min_height_override()
                 radar.invalidate_frame_layer()
+                logger.info(
+                    "AutoFloor F1: %d -> %d ft (standard-floor traffic detected)",
+                    old_floor,
+                    standard_floor,
+                )
             self._radar_visible_since = now
             if (
                 self._auto_idle_clock
@@ -5159,8 +5168,8 @@ class RoundTouchDisplay:
                     if auto_lower and current_floor > 0:
                         old_floor = current_floor
                         new_floor = settings.step_down_min_height_ft()
-                        logger.debug(
-                            "Auto floor F2: %d -> %d ft (lower probe traffic=%s)",
+                        logger.info(
+                            "AutoFloor F2: %d -> %d ft (lower-probe traffic=%s)",
                             old_floor,
                             new_floor,
                             lower_probe_has_traffic,
@@ -5169,6 +5178,10 @@ class RoundTouchDisplay:
                         self._radar_visible_since = now
                         self._safe_draw()
                     else:
+                        logger.info(
+                            "AutoFloor: 0 ft empty for %.0fs -> Auto Idle Clock",
+                            AUTO_IDLE_MIN_RADAR_S,
+                        )
                         self._auto_idle_clock = True
                         self._open_preferred_clock()
                         self._safe_draw()
@@ -5185,7 +5198,7 @@ class RoundTouchDisplay:
             ):
                 old_floor = current_floor
                 new_floor = settings.step_up_min_height_ft()
-                logger.debug("Auto floor F3: %d -> %d ft", old_floor, new_floor)
+                logger.info("AutoFloor F3: %d -> %d ft", old_floor, new_floor)
                 radar.invalidate_frame_layer()
                 self._radar_visible_since = now
                 self._safe_draw()

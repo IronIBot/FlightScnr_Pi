@@ -12,7 +12,6 @@
 import json
 import logging
 import os
-from contextlib import contextmanager
 
 from display.round_touch import color_presets, theme
 logger = logging.getLogger("flightscnr.display")
@@ -1500,23 +1499,6 @@ def clear_min_height_override() -> int:
     _runtime_min_height_ft = None
     _sync_config_min_height()
     return min_height_ft()
-
-
-@contextmanager
-def temporary_min_height_probe(value: int):
-    """Temporarily run existing radar filters at a hypothetical floor."""
-    global _runtime_min_height_ft
-    previous = _runtime_min_height_ft
-    configured = configured_min_height_ft()
-    target = max(0, min(configured, int(value)))
-    target = _snap_min_height(target)
-    _runtime_min_height_ft = None if target >= configured else target
-    _sync_config_min_height()
-    try:
-        yield min_height_ft()
-    finally:
-        _runtime_min_height_ft = previous
-        _sync_config_min_height()
 
 
 def max_height_ft() -> int:
