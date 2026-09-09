@@ -261,3 +261,27 @@ def test_auto_floor_zero_ft_idle_clears_runtime_override(monkeypatch):
     assert cleared == [True]
     assert d._auto_idle_clock is True
     assert opened == [True]
+
+
+def test_floor_hud_only_shows_during_runtime_override(monkeypatch):
+    """FLOOR should not crowd the HUD unless AutoFloor actually lowered it."""
+    from display.round_touch import radar_hud
+
+    monkeypatch.setattr(
+        settings,
+        "auto_lower_altitude_floor_on_empty_enabled",
+        lambda: True,
+    )
+    monkeypatch.setattr(settings, "min_height_ft", lambda: 4500)
+
+    monkeypatch.setattr(settings, "min_height_override_active", lambda: False)
+    width, label, value = radar_hud._floor_bits((28, 30, 34))
+    assert width == 0
+    assert label is None
+    assert value is None
+
+    monkeypatch.setattr(settings, "min_height_override_active", lambda: True)
+    width, label, value = radar_hud._floor_bits((28, 30, 34))
+    assert width > 0
+    assert label is not None
+    assert value is not None

@@ -296,8 +296,11 @@ def _aqi_bits(
 def _floor_bits(
     color: tuple[int, int, int],
 ) -> tuple[int, pygame.Surface | None, pygame.Surface | None]:
-    """Return compact AutoFloor label/value surfaces for the effective radar floor."""
-    if not settings.auto_lower_altitude_floor_on_empty_enabled():
+    """Return AutoFloor HUD surfaces only while the runtime floor is overridden."""
+    if (
+        not settings.auto_lower_altitude_floor_on_empty_enabled()
+        or not settings.min_height_override_active()
+    ):
         return 0, None, None
     try:
         floor_ft = int(settings.min_height_ft())
@@ -306,19 +309,19 @@ def _floor_bits(
     label_font = draw_mod.load_font(max(7, theme.s(8)), bold=True)
     value_font = _ampm_font()
     label_img = label_font.render("FLOOR", True, color)
-    value_color = theme.SWEEP if settings.min_height_override_active() else color
-    value_img = value_font.render(f"{floor_ft} ft", True, value_color)
+    value_img = value_font.render(f"{floor_ft} ft", True, theme.SWEEP)
     return max(label_img.get_width(), value_img.get_width()), label_img, value_img
 
 
 def _geometry(wx: dict | None = None) -> dict:
     """Place HUD items along the curved pill arc with the clock centered.
 
-    Left of clock: weather (icon+temp) · wind · AQI · home
+    Left of clock: weather (icon+temp) · wind · AQI ·
+    AutoFloor FLOOR (only while runtime-overridden) · home
     Right of clock: volume · chime · alert · ATC · LoFi
 
     The pill half-span is ``max(left, right)`` so the clock stays at ``mid``
-    even when AQI widens the left cluster.
+    even when AQI or an active AutoFloor override widens the left cluster.
     """
     cx, cy = theme.CENTER_X, theme.CENTER_Y
     r_mid = int(theme.VISIBLE_RADIUS * 0.84)
