@@ -557,7 +557,7 @@ def _build_settings_picker_items(kind: str) -> list[dict]:
     if kind == "min_height":
         return _enum_picker_items(
             settings.MIN_HEIGHT_OPTIONS,
-            settings.min_height_ft(),
+            settings.configured_min_height_ft(),
             lambda ft: f"{int(ft)} ft",
         )
     if kind == "max_height":
@@ -3036,7 +3036,7 @@ def _options_row_labels() -> list[str]:
         tr("settings.row.traffic_labels", value=settings.traffic_labels_label()),
         tr("settings.row.aircraft_id", value=settings.aircraft_tag_id_label()),
         tr("settings.row.favorite_locations", value=fav),
-        tr("settings.row.min_altitude", value=settings.min_height_ft()),
+        tr("settings.row.min_altitude", value=settings.configured_min_height_ft()),
         tr("settings.row.max_altitude", value=settings.max_height_ft()),
         tr("settings.row.min_aircraft_speed", value=settings.aircraft_min_speed_label()),
         tr("settings.row.min_vessel_speed", value=settings.vessel_min_speed_label()),
