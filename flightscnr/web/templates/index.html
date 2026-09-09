@@ -212,10 +212,10 @@
                 <option value="5000">5000</option>
             </select>
             <div class="chk">
-                <label for="smart_autofloor">Smart AutoFloor</label>
+                <label for="smart_autofloor">Smart AutoFloor (requires Auto Idle Clock)</label>
                 <span class="switch"><input id="smart_autofloor" type="checkbox"><span class="track"></span></span>
             </div>
-            <p class="hint">With Auto Idle Clock enabled, temporarily lowers the radar floor by 500 ft after 5 seconds with no visible traffic, down to 0 ft. The Min altitude floor above remains the saved Standard and is restored as traffic climbs back up.</p>
+            <p class="hint">Inactive while Auto Idle Clock is off. When active, temporarily lowers the radar floor by 500 ft after 5 seconds with no visible aircraft traffic, down to 0 ft. AIS vessels do not affect AutoFloor. The Min altitude floor above remains the saved Standard and is restored as aircraft traffic climbs back up.</p>
             <label for="max_height">Max altitude ceiling (ft)</label>
             <select id="max_height">
                 <option value="1000">1000</option>

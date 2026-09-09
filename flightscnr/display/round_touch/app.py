@@ -5073,29 +5073,19 @@ class RoundTouchDisplay:
             logger.debug("Scheduled weather refresh tick failed", exc_info=True)
 
     def _auto_floor_probe_flights(self) -> list:
-        """Unfiltered aircraft + active AIS snapshot for hypothetical floor tests.
+        """Unfiltered aircraft snapshot for hypothetical AutoFloor tests.
 
         ``self.flights`` comes from ``peek_data()`` and may already have lost
-        aircraft below the current config floor. F2 must be able to see them.
+        aircraft below the current config floor. AutoFloor is altitude-based,
+        so AIS vessels intentionally do not participate in floor occupancy.
         """
         flights = list(self.overhead.peek_data_unfiltered() or [])
-        mode = settings.traffic_mode()
-        if mode == "marine":
-            flights = []
-        if mode in ("marine", "both") and self._ais_vessels:
-            flights.extend(self._ais_vessels)
         return self._position_smoother.apply(flights)
 
     def _auto_floor_standard_has_traffic(self, probe_flights: list) -> bool:
         """F1: traffic visible at the persisted operator standard floor."""
         return radar.visible_in_range_count_at_floor(
             probe_flights, settings.configured_min_height_ft()
-        ) > 0
-
-    def _auto_floor_lower_probe(self, probe_flights: list) -> bool:
-        """F2 probe: continuously report traffic 500 ft below current floor."""
-        return radar.visible_in_range_count_at_floor(
-            probe_flights, settings.next_lower_min_height_ft()
         ) > 0
 
     def _auto_floor_higher_probe(self, probe_flights: list) -> bool:
@@ -5118,13 +5108,54 @@ class RoundTouchDisplay:
 
         now = time.time()
         auto_lower = settings.auto_lower_altitude_floor_on_empty_enabled()
-        probe_flights = self._auto_floor_probe_flights() if auto_lower else []
+
+        # Keep the original lightweight Auto Idle path when Smart AutoFloor is
+        # disabled. Lightweight display/test fakes therefore do not need the
+        # unfiltered source, position smoother, or _radar_flights().
+        if not auto_lower:
+            current_has_traffic = radar.visible_in_range_count(self.flights) > 0
+
+            if self.screen == SCREEN_RADAR:
+                if not current_has_traffic:
+                    if now - self._radar_visible_since >= AUTO_IDLE_MIN_RADAR_S:
+                        self._auto_idle_clock = True
+                        self._open_preferred_clock()
+                        self._safe_draw()
+                    return
+                self._radar_visible_since = now
+                return
+
+            if (
+                self._auto_idle_clock
+                and self.screen in (
+                    SCREEN_CLOCK,
+                    SCREEN_ANALOG_CLOCK,
+                    SCREEN_ANALOG_NIGHT,
+                    SCREEN_FLIEGER_CLOCK,
+                    SCREEN_MOON,
+                    SCREEN_FORECAST,
+                )
+                and current_has_traffic
+            ):
+                self._radar_visible_since = now
+                self._return_to_radar()
+                self._safe_draw()
+            return
+
+        # AutoFloor uses an unfiltered peek + smoother + hypothetical visibility
+        # scans. Rate-limit that heavier state machine to about 1 Hz on the Pi.
+        last_probe = getattr(self, "_last_auto_floor_probe", 0.0)
+        if now - last_probe < 1.0:
+            return
+        self._last_auto_floor_probe = now
+
+        probe_flights = self._auto_floor_probe_flights()
         current_floor = settings.min_height_ft()
         standard_floor = settings.configured_min_height_ft()
 
         # F1 has absolute priority. Any standard-floor traffic immediately
         # restores the persisted floor and stops adaptive lowering.
-        if auto_lower and self._auto_floor_standard_has_traffic(probe_flights):
+        if self._auto_floor_standard_has_traffic(probe_flights):
             changed = current_floor != standard_floor or settings.min_height_override_active()
             if changed:
                 old_floor = current_floor
@@ -5153,31 +5184,22 @@ class RoundTouchDisplay:
                 self._safe_draw()
             return
 
-        # F2 runs continuously whenever adaptive lowering is active. The result
-        # is available every tick; the actual -500 ft action still waits for the
-        # existing AUTO_IDLE_MIN_RADAR_S (=5 s) grace period.
-        lower_probe_has_traffic = (
-            self._auto_floor_lower_probe(probe_flights) if auto_lower else False
+        current_has_traffic = (
+            radar.visible_in_range_count_at_floor(probe_flights, current_floor) > 0
         )
-
-        current_has_traffic = radar.visible_in_range_count(self._radar_flights()) > 0
 
         if self.screen == SCREEN_RADAR:
             if not current_has_traffic:
                 if now - self._radar_visible_since >= AUTO_IDLE_MIN_RADAR_S:
-                    if auto_lower and current_floor > 0:
+                    if current_floor > 0:
                         old_floor = current_floor
                         new_floor = settings.step_down_min_height_ft()
-                        logger.info(
-                            "AutoFloor F2: %d -> %d ft (lower-probe traffic=%s)",
-                            old_floor,
-                            new_floor,
-                            lower_probe_has_traffic,
-                        )
+                        logger.info("AutoFloor F2: %d -> %d ft", old_floor, new_floor)
                         radar.invalidate_frame_layer()
                         self._radar_visible_since = now
                         self._safe_draw()
                     else:
+                        settings.clear_min_height_override()
                         logger.info(
                             "AutoFloor: 0 ft empty for %.0fs -> Auto Idle Clock",
                             AUTO_IDLE_MIN_RADAR_S,
@@ -5192,8 +5214,7 @@ class RoundTouchDisplay:
             # F3 only runs below F1 standard and only while current floor already
             # has traffic. It may raise one 500 ft step, never above standard.
             if (
-                auto_lower
-                and current_floor < standard_floor
+                current_floor < standard_floor
                 and self._auto_floor_higher_probe(probe_flights)
             ):
                 old_floor = current_floor

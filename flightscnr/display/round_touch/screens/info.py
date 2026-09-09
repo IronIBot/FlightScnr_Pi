@@ -527,7 +527,7 @@ def _build_settings_picker_items(kind: str) -> list[dict]:
     if kind == "min_height":
         return _enum_picker_items(
             settings.MIN_HEIGHT_OPTIONS,
-            settings.min_height_ft(),
+            settings.configured_min_height_ft(),
             lambda ft: f"{int(ft)} ft",
         )
     if kind == "max_height":
@@ -2964,7 +2964,7 @@ def _options_row_labels() -> list[str]:
         f"Traffic Labels › {settings.traffic_labels_label()}",
         f"Aircraft ID › {settings.aircraft_tag_id_label()}",
         f"Favorite Locations › {fav}",
-        f"Min Aircraft Altitude › {settings.min_height_ft()} ft",
+        f"Min Aircraft Altitude › {settings.configured_min_height_ft()} ft",
         f"Max Aircraft Altitude › {settings.max_height_ft()} ft",
         f"Min Aircraft Speed › {settings.aircraft_min_speed_label()}",
         f"Min Vessel Speed › {settings.vessel_min_speed_label()}",
@@ -2991,7 +2991,11 @@ def _layers_row_labels() -> list[str]:
         f"Airports \u203a {settings.airport_min_size_label()}",
         "Show Ground Vehicles",
         "Auto Idle Clock",
-        "Smart AutoFloor",
+        (
+            "Smart AutoFloor"
+            if settings.auto_idle_clock_enabled()
+            else "Smart AutoFloor (requires Auto Idle)"
+        ),
         f"Daytime Clock › {settings.default_clock_label()}",
         f"Off-Hours Clock › {settings.default_clock_off_hours_label()}",
         "Alert on military aircraft",
