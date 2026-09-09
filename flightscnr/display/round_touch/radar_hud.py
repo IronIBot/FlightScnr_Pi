@@ -309,7 +309,7 @@ def _floor_bits(
     label_font = draw_mod.load_font(max(7, theme.s(8)), bold=True)
     value_font = _ampm_font()
     label_img = label_font.render("FLOOR", True, color)
-    value_img = value_font.render(f"{floor_ft} ft", True, theme.SWEEP)
+    value_img = value_font.render(f"{floor_ft} ft", True, color)
     return max(label_img.get_width(), value_img.get_width()), label_img, value_img
 
 
