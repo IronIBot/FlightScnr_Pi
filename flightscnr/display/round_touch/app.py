@@ -5156,6 +5156,7 @@ class RoundTouchDisplay:
         # F1 has absolute priority. Any standard-floor traffic immediately
         # restores the persisted floor and stops adaptive lowering.
         if self._auto_floor_standard_has_traffic(probe_flights):
+            self._auto_floor_idle_at_zero = False
             changed = current_floor != standard_floor or settings.min_height_override_active()
             if changed:
                 old_floor = current_floor
@@ -5188,6 +5189,12 @@ class RoundTouchDisplay:
             radar.visible_in_range_count_at_floor(probe_flights, current_floor) > 0
         )
 
+        idle_at_zero = getattr(self, "_auto_floor_idle_at_zero", False)
+        if self.screen != SCREEN_RADAR and idle_at_zero:
+            current_has_traffic = (
+                radar.visible_in_range_count_at_floor(probe_flights, 0) > 0
+            )
+
         if self.screen == SCREEN_RADAR:
             if not current_has_traffic:
                 if now - self._radar_visible_since >= AUTO_IDLE_MIN_RADAR_S:
@@ -5199,6 +5206,7 @@ class RoundTouchDisplay:
                         self._radar_visible_since = now
                         self._safe_draw()
                     else:
+                        self._auto_floor_idle_at_zero = True
                         settings.clear_min_height_override()
                         logger.info(
                             "AutoFloor: 0 ft empty for %.0fs -> Auto Idle Clock",
@@ -5237,6 +5245,9 @@ class RoundTouchDisplay:
             )
             and current_has_traffic
         ):
+            if getattr(self, "_auto_floor_idle_at_zero", False):
+                settings.set_runtime_min_height_ft(0)
+                self._auto_floor_idle_at_zero = False
             self._radar_visible_since = now
             self._return_to_radar()
             self._safe_draw()

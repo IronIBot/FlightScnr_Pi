@@ -285,3 +285,39 @@ def test_floor_hud_only_shows_during_runtime_override(monkeypatch):
     assert width > 0
     assert label is not None
     assert value is not None
+
+
+def test_auto_floor_zero_ft_idle_wakes_for_low_aircraft(monkeypatch):
+    """A low aircraft must wake radar after AutoFloor entered idle from 0 ft."""
+    _enable_auto_floor(monkeypatch)
+
+    monkeypatch.setattr(app_mod.time, "time", lambda: 100.0)
+    monkeypatch.setattr(settings, "min_height_ft", lambda: 5000)
+    monkeypatch.setattr(settings, "configured_min_height_ft", lambda: 5000)
+
+    restored = []
+    monkeypatch.setattr(
+        settings,
+        "set_runtime_min_height_ft",
+        lambda value: restored.append(value) or value,
+    )
+
+    # No traffic at the restored 5000-ft Standard, but traffic exists
+    # when probing the 0-ft floor used immediately before entering idle.
+    monkeypatch.setattr(
+        radar,
+        "visible_in_range_count_at_floor",
+        lambda flights, floor: 1 if floor == 0 else 0,
+    )
+
+    d = _display(app_mod.SCREEN_CLOCK)
+    d._auto_idle_clock = True
+    d._auto_floor_idle_at_zero = True
+    d._auto_floor_probe_flights = lambda: [{"altitude": 2000}]
+    d._auto_floor_standard_has_traffic = lambda flights: False
+
+    d._tick_auto_idle_clock()
+
+    assert restored == [0]
+    assert d._auto_floor_idle_at_zero is False
+    assert d._returned == [True]
