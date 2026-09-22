@@ -73,6 +73,20 @@ Translation catalogs are dependency-free, validated JSON shared by the Python
 display and browser portal. See the [translation contributor
 guide](flightscnr/docs/i18n.md) to review a catalog or add another language.
 
+**Adding a language needs no code changes.** Each language is a self-contained
+folder under `flightscnr/i18n/locales/<locale>/` holding a `manifest.json`
+(locale code, native and English names, catalog revision, authors) and a
+`messages.json`. The loader discovers every folder under that directory at
+startup, so a new language is picked up automatically and appears in the
+on-device and portal pickers by its native name. To add one:
+
+1. Copy the `en` folder to a new normalized locale tag, e.g. `flightscnr/i18n/locales/pt-BR/`.
+2. Fill in the manifest names/authors and translate the values in `messages.json`, leaving the keys and `{placeholders}` unchanged.
+3. That is all the wiring. Each pack is validated on load: placeholders must match English, missing keys fall back to English, and unknown or unsafe packs are skipped, so a partial or outdated translation can never break the UI.
+
+The [contributor guide](flightscnr/docs/i18n.md#adding-a-language) has the full
+rules, review checklist, and version-compatibility contract.
+
 ### Map layers
 
 Ten basemap styles: CARTO dark/light/Voyager (free `CARTO_BASEMAPS_API_KEY`), OSM dark, **Dark Flat** (solid black), Stadia dark + Toner (free `STADIA_MAPS_API_KEY`), Esri streets/satellite, and free FAA VFR sectionals (US). Optional **tag leaders**, **color by altitude**, precipitation, airport overlays, wildfires, and earthquakes.
