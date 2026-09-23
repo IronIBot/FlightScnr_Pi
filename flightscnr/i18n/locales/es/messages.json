@@ -892,6 +892,7 @@
   "settings.row.airports": "Airports › {value}",
   "settings.row.show_ground_vehicles": "Show Ground Vehicles",
   "settings.row.auto_idle_clock": "Auto Idle Clock",
+  "settings.row.smart_auto_floor": "Smart AutoFloor",
   "settings.row.daytime_clock": "Daytime Clock › {value}",
   "settings.row.offhours_clock": "Off-Hours Clock › {value}",
   "settings.row.alert_military": "Alert on military aircraft",
