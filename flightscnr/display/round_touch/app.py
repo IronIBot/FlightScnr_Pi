@@ -5110,12 +5110,11 @@ class RoundTouchDisplay:
     def _auto_floor_probe_flights(self) -> list:
         """Unfiltered aircraft snapshot for hypothetical AutoFloor tests.
 
-        ``self.flights`` comes from ``peek_data()`` and may already have lost
-        aircraft below the current config floor. AutoFloor is altitude-based,
-        so AIS vessels intentionally do not participate in floor occupancy.
-        """
-        flights = list(self.overhead.peek_data_unfiltered() or [])
-        return self._position_smoother.apply(flights)
+        Auto Floor must not feed its hypothetical probe through the shared
+        position smoother because that would drop tracks not present in the
+        probe batch and disturb their normal smoothing."""
+
+        return list(self.overhead.peek_data_unfiltered() or [])
 
     def _auto_floor_standard_has_traffic(self, probe_flights: list) -> bool:
         """F1: traffic visible at the persisted operator standard floor."""

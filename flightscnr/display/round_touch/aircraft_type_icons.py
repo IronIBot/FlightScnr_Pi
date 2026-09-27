@@ -242,6 +242,17 @@ def _looks_like_stationary_surface_target(flight: dict) -> bool:
     Some feeds expose tower / fixed airport transmitters as category C0 rather than
     the C1/C2 surface-vehicle categories. Keep this fallback deliberately strict so
     a normal taxiing or parked aircraft is not hidden merely because it is on ground.
+
+    Safety note: category set "C" (C0-C7, DO-260B / ICAO Doc 9871) is only ever
+    transmitted in TC=2 surface-position messages for ground vehicles and fixed
+    obstacles. A real aircraft always identifies via category set A (TC=4,
+    powered aircraft/rotorcraft) or set B (TC=3, gliders/balloons/UAVs/etc.), so
+    "C0" cannot appear for an aircraft merely because its type/registration
+    lookup has not completed yet. adsb_category also defaults to "" (falsy),
+    never to "C0", wherever a source has no category data (see
+    dump1090_client.py, adsb_client.py, adsbexchange_client.py); opensky and the
+    generic position_source path never populate it at all. So this branch only
+    fires on an explicit C0 report from the feed itself.
     """
     if _adsb_category(flight) != "C0":
         return False
